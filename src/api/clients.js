@@ -172,7 +172,7 @@ export const clientsAPI = {
   // Semantic search
   semanticSearch: async (query, clientId) => {
     try {
-      const response = await apiClient.post('/api/chat/search', { query, clientId });
+      const response = await apiClient.post('/api/chat/semantic-search', { query, clientId });
       return response.data;
     } catch (error) {
       throw {
