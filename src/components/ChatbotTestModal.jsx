@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { clientsAPI } from '../api/clients';
 import './ChatbotTestModal.css';
 
+const API_BASE_URL = 'http://localhost:8080/api';
+
 const ChatbotTestModal = ({ isOpen, onClose }) => {
   const [clients, setClients] = useState([]);
   const [selectedClient, setSelectedClient] = useState('');
@@ -9,6 +11,7 @@ const ChatbotTestModal = ({ isOpen, onClose }) => {
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
+  const [sessionId, setSessionId] = useState('');
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -24,6 +27,23 @@ const ChatbotTestModal = ({ isOpen, onClose }) => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    if (isOpen && !sessionId) {
+      const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      setSessionId(newSessionId);
+      console.log(`[SESSION] Generated new session ID: ${newSessionId}`);
+    }
+  }, [isOpen, sessionId]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setMessages([]);
+      setInputMessage('');
+      setSessionId('');
+      setIsLoading(false);
+    }
+  }, [isOpen]);
 
   const fetchClients = async () => {
     try {
@@ -65,7 +85,7 @@ const ChatbotTestModal = ({ isOpen, onClose }) => {
     setIsLoading(true);
 
     try {
-      const response = await clientsAPI.semanticSearch(textToSend, selectedClient);
+      const response = await clientsAPI.semanticSearch(textToSend, selectedClient, sessionId);
       const botMessage = { 
         sender: 'bot', 
         text: response.answer,
@@ -84,8 +104,83 @@ const ChatbotTestModal = ({ isOpen, onClose }) => {
     }
   };
 
-  const handleSuggestedQuestionClick = (question) => {
-    sendMessage(question);
+  const handleSuggestedQuestionClick = async (suggestion) => {
+    if (isLoading) return;
+    
+    // Handle both old string format and new object format
+    const questionText = typeof suggestion === 'string' ? suggestion : suggestion.question;
+    const originalQuestion = typeof suggestion === 'object' ? suggestion.originalQuestion : suggestion;
+    const userLanguage = typeof suggestion === 'object' ? suggestion.userLanguage : 'en';
+    
+    setInputMessage(questionText);
+    setIsLoading(true);
+
+    try {
+      // If we have original question and user language, use the suggestion click handler
+      if (originalQuestion && userLanguage !== 'en') {
+        const response = await fetch(`${API_BASE_URL}/chat/suggestion-click`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            originalQuestion: originalQuestion,
+            userLanguage: userLanguage,
+            clientId: selectedClient,
+            sessionId: sessionId,
+          }),
+        });
+
+        const data = await response.json();
+        
+        setMessages(prev => [...prev, 
+          { sender: 'user', text: questionText },
+          { 
+            sender: 'bot', 
+            text: data.answer,
+            score: data.score,
+            confidence: data.confidence,
+            type: data.type
+          }
+        ]);
+      } else {
+        // Fallback to regular semantic search
+        const response = await fetch(`${API_BASE_URL}/chat/semantic-search`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            query: questionText,
+            clientId: selectedClient,
+            sessionId: sessionId,
+          }),
+        });
+
+        const data = await response.json();
+        
+        setMessages(prev => [...prev, 
+          { sender: 'user', text: questionText },
+          { 
+            sender: 'bot', 
+            text: data.answer,
+            suggestedQuestions: data.suggestedQuestions || null,
+            score: data.score,
+            confidence: data.confidence,
+            type: data.type
+          }
+        ]);
+      }
+    } catch (error) {
+      console.error('Error sending suggested question:', error);
+      setMessages(prev => [...prev, 
+        { sender: 'user', text: questionText },
+        { sender: 'bot', text: 'Sorry, there was an error processing your question.' }
+      ]);
+    } finally {
+      setIsLoading(false);
+      setInputMessage('');
+    }
   };
 
   const handleKeyPress = (e) => {
@@ -149,14 +244,15 @@ const ChatbotTestModal = ({ isOpen, onClose }) => {
                       {message.suggestedQuestions && message.suggestedQuestions.length > 0 && (
                         <div className="suggested-questions">
                           <p className="suggestions-label">Try asking:</p>
-                          {message.suggestedQuestions.map((question, qIndex) => (
+                          {message.suggestedQuestions.map((suggestion, qIndex) => (
                             <button
-                              key={qIndex}
+                              key={suggestion.id || qIndex}
                               className="suggested-question-btn"
-                              onClick={() => handleSuggestedQuestionClick(question)}
+                              onClick={() => handleSuggestedQuestionClick(suggestion)}
                               disabled={isLoading}
+                              title={typeof suggestion === 'object' ? `Relevance: ${suggestion.relevanceReason} (Score: ${suggestion.score})` : ''}
                             >
-                              {question}
+                              {typeof suggestion === 'string' ? suggestion : suggestion.question}
                             </button>
                           ))}
                         </div>
