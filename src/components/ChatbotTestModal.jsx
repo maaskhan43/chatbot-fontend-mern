@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { clientsAPI } from '../api/clients';
 import './ChatbotTestModal.css';
 
-const API_BASE_URL = 'http://localhost:8080/api';
+const API_BASE_URL =process.env.VITE_BACKEND_URL;
 
 const ChatbotTestModal = ({ isOpen, onClose }) => {
   const [clients, setClients] = useState([]);
